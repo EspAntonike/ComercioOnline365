@@ -1,6 +1,5 @@
 # public_app.py
 from flask import Flask, render_template, request
-from db import get_conn, init_db
 from pathlib import Path
 import sqlite3
 import hashlib
@@ -9,18 +8,32 @@ import os
 app = Flask(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "products.db"   # nombre fijo de la base de datos
-
-# Asegura que la DB exista
-init_db()
+DB_PATH = BASE_DIR / "products.db"   # BD actual en uso
+TEMP_PATH = BASE_DIR / "db_temp.db"  # BD en espera (recibida desde subir.py)
 
 # 🔑 Hash SHA256 de la contraseña correcta
-# Genera con: python -c "import hashlib; print(hashlib.sha256(b'mi_clave').hexdigest())"
-PASSWORD_HASH = "c40e957c730718233694f439449d0166bceea4d46007c789319686233545bc54"  
+PASSWORD_HASH = "c40e957c730718233694f439449d0166bceea4d46007c789319686233545bc54"
+
+
+def get_conn():
+    """Devuelve conexión a la BD actual"""
+    if not DB_PATH.exists():
+        return None
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
 @app.route("/")
 def index():
+    # 🔄 Si hay una nueva BD en TEMP, la activamos
+    if TEMP_PATH.exists():
+        os.replace(TEMP_PATH, DB_PATH)
+
+    conn = get_conn()
+    if conn is None:
+        return "⚠️ No hay base de datos disponible. Sube una con subir.py.", 503
+
     q = request.args.get("q", "").strip()
     cat = request.args.get("category", "").strip()
 
@@ -39,16 +52,15 @@ def index():
         sql += " WHERE " + " AND ".join(filters)
     sql += " ORDER BY created_at DESC"
 
-    with get_conn() as conn:
-        products = conn.execute(sql, params).fetchall()
-        cats = conn.execute("SELECT DISTINCT category FROM products ORDER BY category").fetchall()
+    products = conn.execute(sql, params).fetchall()
+    cats = conn.execute("SELECT DISTINCT category FROM products ORDER BY category").fetchall()
+    conn.close()
 
     categories = [r["category"] for r in cats]
 
     return render_template("index.html", products=products, categories=categories, q=q, cat=cat)
 
 
-# === NUEVA RUTA PARA RECIBIR BD DESDE subir.py ===
 @app.route("/receive", methods=["POST"])
 def receive():
     password = request.form.get("password", "")
@@ -62,17 +74,14 @@ def receive():
     if phash != PASSWORD_HASH:
         return "FAIL", 403
 
-    # Guardar archivo temporalmente
-    temp_path = BASE_DIR / "db_temp.db"
-    file.save(temp_path)
+    # Guardar archivo como BD temporal
+    file.save(TEMP_PATH)
 
     # Validar que es una BD SQLite legible
     try:
-        with sqlite3.connect(temp_path) as conn:
+        with sqlite3.connect(TEMP_PATH) as conn:
             rows = conn.execute("SELECT COUNT(*) FROM products").fetchone()
-            print(f"✅ BD recibida con {rows[0]} productos")
-        # Reemplazar la BD actual
-        os.replace(temp_path, DB_PATH)
+            print(f"✅ BD recibida con {rows[0]} productos (esperando refresco del navegador)")
     except Exception as e:
         return f"ERROR: {e}", 500
 
@@ -80,5 +89,4 @@ def receive():
 
 
 if __name__ == "__main__":
-    # Producción: usa gunicorn/uwsgi + reverse proxy
     app.run(debug=True, port=5000)
