@@ -9,14 +9,14 @@ import os
 app = Flask(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "database.db"   # nombre fijo de la base de datos
+DB_PATH = BASE_DIR / "products.db"   # nombre fijo de la base de datos
 
 # Asegura que la DB exista
 init_db()
 
 # 🔑 Hash SHA256 de la contraseña correcta
 # Genera con: python -c "import hashlib; print(hashlib.sha256(b'mi_clave').hexdigest())"
-PASSWORD_HASH = "c40e957c730718233694f439449d0166bceea4d46007c789319686233545bc54"  # ejemplo hash para "password"
+PASSWORD_HASH = "c40e957c730718233694f439449d0166bceea4d46007c789319686233545bc54"  
 
 
 @app.route("/")
